@@ -1,0 +1,37 @@
+# configuration settings
+
+# example configuraiton:
+#registries:
+#  -
+#    hostname: 'my-registry.com'
+#    authConfig: 'dockerconfigjson value'
+#    syncPeriod: '*/1 * * * *'
+#    syncerScript: 'getImages.sh'
+#    registryProvider: 'docker'
+#
+# ---
+# syncer scripts should be placed in pkg/sync-scripts (todo, use an env var)
+
+registries:
+  -
+    hostname: 'my-registry.com'
+    repository: 'test-images'
+    pullAuthConfig: ''
+    pushAuthConfig: ''
+    syncPeriod: '*/1 * * * *'
+    syncerScript: 'test.sh'
+    syncerScriptArgs: ''
+    registryProvider: 'docker'
+
+
+# display can be either 'spinner' or empty.
+# spinner will display a spinner when syncing registries, but doesn't display output for multiple registries being sync'ed at the same time very well.
+# use this if you're just loading images, or if you are only syncing registries on periods which will not overlap
+#
+# std will just display the raw output of the docker sdk, which is more verbose
+display: "spinner"
+api:
+  port: 8001
+  enabled: true
+  authToken: this-is-a-token-lol
+  enableAuth: true
