@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"github.com/pkg/errors"
 	"os/exec"
 	"strings"
@@ -16,13 +17,14 @@ import (
 
 var TimeFormat = time.RFC850
 var Logger *logrus.Logger
+var ErrLogger *logrus.Logger
 
 type Registry struct {
 	// Hostname of the registry, not including https
 	Hostname string `yaml:"hostname"`
 	// Repository is a prefix added to an image which denotes a particular base repository
 	// for a collection of images.
-	Repository string
+	Repository string `yaml:"repository"`
 	// PushAuthConfig is the dockerconfigjson value for the registry that will be pushed to
 	PushAuthConfig string `yaml:"pushAuthConfig"`
 	// PullAuthConfig is the dockerconfigjson value for the registry that will be pulled from
@@ -36,6 +38,8 @@ type Registry struct {
 	SyncerScriptArgs string `yaml:"syncerScriptArgs"`
 	// RegistryProvider is the type of registry (docker / harbor)
 	RegistryProvider string `yaml:"registryProvider"`
+	// DeleteLocalImages instructs the syncer to remove locally downloaded images after pushing them to a registry.
+	DeleteLocalImages bool `yaml:"deleteLocalImages"`
 }
 
 type Registries []Registry
@@ -69,19 +73,19 @@ type SyncerBase struct {
 	RegistryHostName   string
 	Repository         string
 	JobTag             string
+	RemoveLocalImages  bool
 	PullAuth           string `json:"-"`
 	PushAuth           string `json:"-"`
 	Job                *gocron.Job
 }
 
 func (e *Executor) ExecScript() ([]string, error) {
-	// todo; this should also accept args
-	//  and the error handling needs to be better
-	Logger.Infof("Executing %s", "./sync-scripts/"+e.File)
 
-	cmd := exec.Command("./sync-scripts/" + e.File)
-	cmd.Args = strings.Split(e.Args, " ")
-	output, err := cmd.Output()
+	Logger.Infof("Executing %s", e.File)
+
+	cmd := exec.Command(e.File, strings.Split(e.Args, " ")...)
+	fmt.Println(cmd.String())
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, err
 	}
@@ -90,12 +94,16 @@ func (e *Executor) ExecScript() ([]string, error) {
 }
 
 func ReTag(image, host, repository string) string {
-	split := strings.Split(image, "/")
-	newHost := host
-	if repository != "" {
-		newHost = newHost + "/" + repository
+	var newImg string
+	if strings.HasPrefix(image, repository) {
+		newImg = host + "/" + image
+	} else {
+		if repository != "" {
+			newImg = host + "/" + repository + "/" + image
+		} else {
+			newImg = host + "/" + image
+		}
 	}
-	newImg := strings.ReplaceAll(image, split[0], newHost)
 	return newImg
 }
 

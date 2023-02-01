@@ -91,7 +91,7 @@ func (h *Handler) Ops(w http.ResponseWriter, r *http.Request) {
 
 		err := PauseRegistry(s, h.Pool.CronJobScheduler)
 		if err != nil {
-			pkg.Logger.Errorf("error encountered pausing registry: %v", err)
+			pkg.ErrLogger.Errorf("error encountered pausing registry: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 

@@ -13,7 +13,7 @@ import (
 )
 
 func BeginSynchronization(ctx *cli.Context) error {
-	pkg.Logger.Infof("Setting up registry synchronators")
+	pkg.Logger.Infof("Setting up registry synchronizers")
 	cronRunner := gocron.NewScheduler(time.UTC)
 	pool := &SyncerPool{
 		Syncers:          make(map[string]*Syncer),
@@ -26,21 +26,23 @@ func BeginSynchronization(ctx *cli.Context) error {
 			return fmt.Errorf("fatal: dupliacte registry found (%s), each registry hostname may only be configured once", registry.Hostname)
 		}
 
-		if syncer, _, err := SetupRegistryJob(registry, pool, cronRunner); err != nil {
-			pkg.Logger.Errorf("error encountered setting up registry sync: %v", err)
-		} else {
-			pool.Syncers[registry.Hostname] = syncer
+		syncer, _, err := SetupRegistryJob(registry, cronRunner)
+		if err != nil {
+			pkg.ErrLogger.Errorf("error encountered setting up registry sync: %v", err)
+			continue
 		}
+
+		pool.Syncers[registry.Hostname] = syncer
 	}
 
 	if viper.GetBool("api.enabled") {
 		pkg.Logger.Infof("Starting Sync server...")
 		go StartServer(pool)
 		pkg.Logger.Infof("Sync server up!")
-		pkg.Logger.Infof("Access the BeginSynchronization Server on http://localhost:%s", viper.GetString("api.port"))
+		pkg.Logger.Infof("Access the Syncrhonization Server on http://localhost:%s", viper.GetString("api.port"))
 	}
 
-	pkg.Logger.Infof("Registry synchronators created!")
+	pkg.Logger.Infof("Registry synchronizers created!")
 
 	// Run all configured jobs forever!
 	pool.CronJobScheduler.StartBlocking()
@@ -48,14 +50,14 @@ func BeginSynchronization(ctx *cli.Context) error {
 	return nil
 }
 
-func SetupRegistryJob(registry pkg.Registry, pool *SyncerPool, cronRunner *gocron.Scheduler) (*Syncer, *gocron.Job, error) {
+func SetupRegistryJob(registry pkg.Registry, cronRunner *gocron.Scheduler) (*Syncer, *gocron.Job, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	syncer, tag, err := BuildDockerSyncer(ctx, cancel, registry)
+	syncer, tag, err := BuildRegistrySyncer(ctx, cancel, registry)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	job, err := cronRunner.Cron(registry.SyncPeriod).Do(ProcessRegistry, ctx, syncer)
+	job, err := cronRunner.Cron(registry.SyncPeriod).Do(syncer.Process)
 	if err != nil {
 		return nil, nil, err
 	}

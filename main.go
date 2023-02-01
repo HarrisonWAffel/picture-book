@@ -36,8 +36,13 @@ func main() {
 					&cli.StringFlag{
 						Name:     "registry",
 						Value:    "",
-						Required: true,
+						Required: false,
 						Usage:    "the hostname of the registry you want to load",
+					},
+					&cli.BoolFlag{
+						Name:     "all",
+						Value:    false,
+						Required: false,
 					},
 				},
 				Description: "load a set of images into a repository using the script configured in config.yaml",
@@ -74,10 +79,19 @@ func main() {
 	}
 	pkg.Logger = &logrus.Logger{
 		Out:   os.Stderr,
-		Level: logrus.DebugLevel,
+		Level: logrus.InfoLevel,
 		Formatter: &easy.Formatter{
 			TimestampFormat: pkg.TimeFormat,
 			LogFormat:       "[%time%] %msg%\n",
+		},
+	}
+
+	pkg.ErrLogger = &logrus.Logger{
+		Out:   os.Stderr,
+		Level: logrus.InfoLevel,
+		Formatter: &easy.Formatter{
+			TimestampFormat: pkg.TimeFormat,
+			LogFormat:       "[%lvl%][%time%] %msg%\n",
 		},
 	}
 	config.Setup()

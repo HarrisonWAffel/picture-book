@@ -5,59 +5,64 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/docker/docker/api/types"
 	"github.com/pkg/errors"
 	"time"
 
 	"github.com/HarrisonWAffel/playground/picture-book/pkg"
 	"github.com/docker/docker/client"
-	"github.com/sirupsen/logrus"
 	"github.com/theckman/yacspin"
 )
 
-func ProcessRegistry(ctx context.Context, syncer *Syncer) {
-	pkg.Logger.Infof("Beginning to sync images for %s", syncer.RegistryHostName)
-	images, err := syncer.Executor.ExecScript()
+func (d *Syncer) Process() {
+	images, err := d.ExecScript()
 	if err != nil {
-		pkg.Logger.Errorf("Failed to execute syncer script '%s', skipping synchronization attempt for host '%s'", syncer.Executor.File, syncer.RegistryHostName)
+		pkg.ErrLogger.Errorf("error encountered when executing syncer script %s. Exiting script execution and image syncing process: %v", d.Executor.File, err)
 		return
 	}
-
+	pkg.Logger.Infof("Beginning synchronization for %s", d.RegistryHostName)
 SyncLoop:
 	for _, image := range images {
 		if image == "" {
 			continue
 		}
 
-		// check for any cancel signals
+		// check for any cancel signals from the API
 		select {
-		case <-syncer.Context.Done():
+		case <-d.Context.Done():
 			pkg.Logger.Infof("Canceling image synchronization due to syncer pause via API")
 			break SyncLoop
 		default:
 
 		}
 
-		err := syncer.Pull(image)
+		err := d.Pull(image)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			logrus.Errorf("Error encountered while pulling %s: %v", image, err)
+			pkg.ErrLogger.Errorf("Error encountered while pulling %s: %v", image, err)
 			continue
 		}
 
-		// retag image for registry
-		reTaggedImage, err := syncer.Retag(ctx, image)
+		reTaggedImage, err := d.Retag(d.Context, image)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			logrus.Errorf("Could not retag image '%s' -> '%s': %v", image, reTaggedImage, err)
+			pkg.ErrLogger.Errorf("Could not retag image '%s' -> '%s': %v", image, reTaggedImage, err)
 			continue
 		}
 
-		err = syncer.Push(reTaggedImage)
+		err = d.Push(reTaggedImage)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			logrus.Errorf("Error encountered while pushing %s to %s: %v", reTaggedImage, syncer.RegistryHostName, err)
+			pkg.ErrLogger.Errorf("Error encountered while pushing %s to %s: %v", reTaggedImage, d.RegistryHostName, err)
 			continue
+		}
+
+		if d.RemoveLocalImages {
+			// this also removes the retagged image since they share the same image ID
+			err = d.RemoveImage(image, reTaggedImage)
+			if err != nil {
+				pkg.ErrLogger.Errorf("couldn't delete locally held image %s: %v", image, err)
+			}
 		}
 	}
-
-	pkg.Logger.Infof("Done syncing images for %s", syncer.RegistryHostName)
+	pkg.Logger.Infof("Done synchronizing images for %s", d.RegistryHostName)
 }
 
 var cfg = yacspin.Config{
@@ -70,6 +75,64 @@ var cfg = yacspin.Config{
 	StopColors:      []string{"fgGreen"},
 }
 
+// implementation for syncer functions push, pull, retag, and remove.
+// I recognize the implementation is duplicated for spinner vs non-spinner, but I like the spinner :)
+// should de-duplicate at some point in the future (maybe).
+
+func RemoveWithSpinner(ctx context.Context, client *client.Client, image, reTaggedImage string) error {
+	spinner, _ := yacspin.New(cfg)
+	spinner.Suffix(fmt.Sprintf("[%s] Removing locally held images %s, %s", time.Now().Format(pkg.TimeFormat), image, reTaggedImage))
+	spinner.Start()
+	defer spinner.Stop()
+	img, _, err := client.ImageInspectWithRaw(ctx, image)
+	if err != nil {
+		return err
+	}
+	// force delete the image using its ID
+	_, err = client.ImageRemove(ctx, img.ID, types.ImageRemoveOptions{
+		Force:         true,
+		PruneChildren: true,
+	})
+	return err
+}
+
+func RemoveWithoutSpinner(ctx context.Context, client *client.Client, image, reTaggedImage string) error {
+	pkg.Logger.Infof("Removing locally held images %s, %s", image, reTaggedImage)
+	img, _, err := client.ImageInspectWithRaw(ctx, image)
+	if err != nil {
+		return err
+	}
+	// force delete the image using its ID
+	_, err = client.ImageRemove(ctx, img.ID, types.ImageRemoveOptions{
+		Force:         true,
+		PruneChildren: true,
+	})
+	return err
+}
+
+func RetagWithSpinner(ctx context.Context, client *client.Client, image, hostname, repository string) (string, error) {
+	reTaggedImage := pkg.ReTag(image, hostname, repository)
+	spinner, _ := yacspin.New(cfg)
+	spinner.Suffix(fmt.Sprintf("[%s] Retagging %s -> %s: ", time.Now().Format(pkg.TimeFormat), image, reTaggedImage))
+	spinner.Start()
+	defer spinner.Stop()
+	err := client.ImageTag(ctx, image, reTaggedImage)
+	if err != nil {
+		return "", err
+	}
+	return reTaggedImage, nil
+}
+
+func RetagWithoutSpinner(ctx context.Context, client *client.Client, image, hostname, repository string) (string, error) {
+	reTaggedImage := pkg.ReTag(image, hostname, repository)
+	pkg.Logger.Infof("Retagging %s -> %s", image, reTaggedImage)
+	err := client.ImageTag(ctx, image, reTaggedImage)
+	if err != nil {
+		return "", err
+	}
+	return reTaggedImage, nil
+}
+
 func PullWithSpinner(ctx context.Context, client *client.Client, image, hostname, auth string) error {
 	spinner, _ := yacspin.New(cfg)
 	spinner.Suffix(fmt.Sprintf("[%s] Pulling %s: ", time.Now().Format(pkg.TimeFormat), image))
@@ -80,7 +143,7 @@ func PullWithSpinner(ctx context.Context, client *client.Client, image, hostname
 	if err != nil {
 		return err
 	}
-
+	defer r.Close()
 	var status Status
 	scanner := bufio.NewScanner(r)
 	for {
@@ -134,7 +197,7 @@ func PullWithoutSpinner(ctx context.Context, client *client.Client, image, hostn
 		if status.Progress == "" {
 			fmt.Println(fmt.Sprintf("%s: %s:", hostname, status.Status))
 		} else {
-			fmt.Println(fmt.Printf("%s: %s: %s %s", image, status.Status, status.Progress))
+			fmt.Println(fmt.Printf("%s: %s: %s", image, status.Status, status.Progress))
 		}
 	}
 	return nil

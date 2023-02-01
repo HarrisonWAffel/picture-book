@@ -1,6 +1,7 @@
 # Picture-Book
 
-#### A container registry synchronization tool created during SUSE Hackweek 2023
+##### A container registry synchronization tool created during SUSE Hackweek 2023
+###### What is a container registry if not a place to store and retrieve images, much like a picture-book
 
 ---
 
@@ -24,7 +25,7 @@ A sample configuration can be found below
 # registries contains a list of registries that can be used and their relevant details 
 registries:
   -
-    # The FQDN of the regsitry. This can also be an IP address
+    # The FQDN of the regsitry
     hostname: 'my-registry.com'
     # A prefix added to each image used to create a container repository within the registry server
     repository: 'test-images'
@@ -38,6 +39,8 @@ registries:
     syncerScript: 'test.sh'
     # Any arguments that need to be provided to the syncerScript
     syncerScriptArgs: ''
+    # Remove pull and retagged images once they have been succesfully pushed to the target registry
+    deleteLocalImages: true
 
 
 # The display format that picture-book will use. This may be either 'spinner' or empty.
@@ -54,7 +57,7 @@ api:
   # Denote if the API requires an Authorization header
   enableAuth: true
   # Provide the token which must be supplied in the Authorization header when API authentication is enabled.
-  authToken: this-is-a-token-lol
+  authToken: this-is-a-token
 
 ```
 

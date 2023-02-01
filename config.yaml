@@ -15,13 +15,13 @@
 registries:
   -
     hostname: 'my-registry.com'
-    repository: 'test-images'
+    repository: 'test'
     pullAuthConfig: ''
     pushAuthConfig: ''
     syncPeriod: '*/1 * * * *'
-    syncerScript: 'test.sh'
-    syncerScriptArgs: ''
-    registryProvider: 'docker'
+    syncerScript: 'sync-scripts/get-rancher-images-for-tag'
+    syncerScriptArgs: 'v2.6.4'
+    deleteLocalImages: true
 
 
 # display can be either 'spinner' or empty.

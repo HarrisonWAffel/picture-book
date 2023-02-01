@@ -44,7 +44,7 @@ func ResumeRegistry(syncName string, pool *SyncerPool) (*Syncer, *gocron.Job, er
 		return nil, nil, pkg.RegistryNotFound
 	}
 
-	syncer, job, err := SetupRegistryJob(registry, pool, pool.CronJobScheduler)
+	syncer, job, err := SetupRegistryJob(registry, pool.CronJobScheduler)
 	if err != nil {
 		return nil, nil, err
 	}

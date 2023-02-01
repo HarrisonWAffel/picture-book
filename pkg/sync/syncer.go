@@ -8,7 +8,6 @@ import (
 
 	"github.com/HarrisonWAffel/playground/picture-book/pkg"
 	"github.com/docker/docker/client"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
@@ -18,6 +17,36 @@ type Syncer struct {
 	context.CancelFunc `json:"-"`
 	pkg.SyncerBase
 	client *client.Client
+}
+
+func BuildRegistrySyncer(ctx context.Context, cancel context.CancelFunc, registry pkg.Registry) (*Syncer, string, error) {
+	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return &Syncer{}, "", fmt.Errorf("could not create docker client for registry %s: %w", registry.Hostname, err)
+	}
+	tag := pkg.BuildCronJobTag(registry.Hostname)
+	syncer := Syncer{
+		Context:    ctx,
+		CancelFunc: cancel,
+		SyncerBase: pkg.SyncerBase{
+			Details: pkg.Details{
+				Created: time.Now(),
+			},
+			JobTag:            tag,
+			RemoveLocalImages: registry.DeleteLocalImages,
+			RegistryHostName:  registry.Hostname,
+			Repository:        registry.Repository,
+			PullAuth:          registry.PullAuthConfig,
+			PushAuth:          registry.PushAuthConfig,
+			Executor: pkg.Executor{
+				File: registry.SyncerScript,
+				Args: registry.SyncerScriptArgs,
+			},
+		},
+		client: dockerClient,
+	}
+
+	return &syncer, tag, nil
 }
 
 func (d *Syncer) EndContext() {
@@ -50,53 +79,36 @@ func (d *Syncer) Push(image string) error {
 	}
 }
 
-func (d *Syncer) Retag(ctx context.Context, image string) (string, error) {
-	reTaggedImage := pkg.ReTag(image, d.RegistryHostName, d.Repository)
-	err := d.client.ImageTag(ctx, image, reTaggedImage)
-	if err != nil {
-		return "", err
+func (d *Syncer) RemoveImage(image, retagged string) error {
+	// get the image so we have its ID
+	switch viper.GetString("display") {
+	case "spinner":
+		return RemoveWithSpinner(d.Context, d.client, image, retagged)
+	default:
+		return RemoveWithoutSpinner(d.Context, d.client, image, retagged)
 	}
-	return reTaggedImage, nil
+}
+
+func (d *Syncer) Retag(ctx context.Context, image string) (string, error) {
+	switch viper.GetString("display") {
+	case "spinner":
+		return RetagWithSpinner(ctx, d.client, image, d.RegistryHostName, d.Repository)
+	default:
+		return RetagWithoutSpinner(ctx, d.client, image, d.RegistryHostName, d.Repository)
+	}
 }
 
 func (d *Syncer) ExecScript() ([]string, error) {
 	return d.Executor.ExecScript()
 }
 
-func (d *Syncer) Load() {
-	images, err := d.ExecScript()
-	if err != nil {
-		pkg.Logger.Errorf("error encountered when executing syncer script %s. Exiting script execution and image syncing process: %v", d.Executor.File, err)
-		return
-	}
-	for _, i := range images {
-		if i == "" {
-			continue
-		}
-
-		if err := d.Pull(i); err != nil {
-			logrus.Error(fmt.Errorf("could not pull %s, skipping", i))
-			continue
-		}
-
-		reTaggedImage, err := d.Retag(d.Context, i)
-		if err != nil {
-			logrus.Error(fmt.Errorf("failed to retag image %s, skipping", i))
-			continue
-		}
-
-		if err = d.Push(reTaggedImage); err != nil {
-			// todo; should we clean it automatically?
-			logrus.Error(fmt.Errorf("could not push %s, skipping. Ensure unpushed images are cleaned from host system", reTaggedImage))
-			continue
-		}
-	}
-}
-
 func (d *Syncer) ChangePeriod(cron string) {
-	// todo
-	j := d.Job
-	_ = j
+
+	// todo; still debating this function
+	//  and if we should allow the API to
+	//  change registry configurations outside
+	//  of the config.yaml. The changes won't persist
+	//  so I don't see much point
 	return
 }
 
@@ -108,35 +120,6 @@ func (d *Syncer) Info() []byte {
 	d.Details.NumberOfSyncs = d.Job.RunCount()
 	j, _ := json.MarshalIndent(d, "", " ")
 	return j
-}
-
-func BuildDockerSyncer(ctx context.Context, cancel context.CancelFunc, registry pkg.Registry) (*Syncer, string, error) {
-	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		return &Syncer{}, "", fmt.Errorf("could not create docker client for registry %s: %w", registry.Hostname, err)
-	}
-	tag := pkg.BuildCronJobTag(registry.Hostname)
-	syncer := Syncer{
-		Context:    ctx,
-		CancelFunc: cancel,
-		SyncerBase: pkg.SyncerBase{
-			Details: pkg.Details{
-				Created: time.Now(),
-			},
-			JobTag:           tag,
-			RegistryHostName: registry.Hostname,
-			Repository:       registry.Repository,
-			PullAuth:         registry.PullAuthConfig,
-			PushAuth:         registry.PushAuthConfig,
-			Executor: pkg.Executor{
-				File: registry.SyncerScript,
-				Args: registry.SyncerScriptArgs,
-			},
-		},
-		client: dockerClient,
-	}
-
-	return &syncer, tag, nil
 }
 
 type Status struct {
