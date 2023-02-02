@@ -4,7 +4,7 @@
 #registries:
 #  -
 #    hostname: 'my-registry.com'
-#    authConfig: 'dockerconfigjson value'
+#    authConfig: 'username:password'
 #    syncPeriod: '*/1 * * * *'
 #    syncerScript: 'getImages.sh'
 #    registryProvider: 'docker'
@@ -14,8 +14,8 @@
 
 registries:
   -
-    hostname: 'my-registry.com'
-    repository: 'test'
+    hostname: 'test-registry.space'
+    repository: ''
     pullAuthConfig: ''
     pushAuthConfig: ''
     syncPeriod: '*/1 * * * *'
@@ -33,5 +33,5 @@ display: "spinner"
 api:
   port: 8001
   enabled: true
-  authToken: this-is-a-token-lol
+  authToken: this-is-a-token
   enableAuth: true

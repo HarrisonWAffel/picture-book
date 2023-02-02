@@ -29,17 +29,19 @@ registries:
     hostname: 'my-registry.com'
     # A prefix added to each image used to create a container repository within the registry server
     repository: 'test-images'
-    # the DockerConfigJSON required to pull images from the registry being synchronized from
-    pullAuthConfig: ''
-    # the DockerConfigJSON required to push images to the registry being synchronized to
-    pushAuthConfig: ''
+    # the username and password for the registry being pulled from, in the format of username:password
+    pullAuthConfig: 'testuser:testpassword'
+    # the username and password for the registry being pushed to, in the format of username:password
+    pushAuthConfig: 'testuser:testpassword'
     # A cron syntax representing the continuous synchronization schedule
     syncPeriod: '*/1 * * * *'
     # The executable that will list the images which must by synchronized, including their tags
     syncerScript: 'test.sh'
     # Any arguments that need to be provided to the syncerScript
     syncerScriptArgs: ''
-    # Remove pull and retagged images once they have been succesfully pushed to the target registry
+    # Remove pull and retagged images once they have been succesfully pushed to the target registry.
+    # This option is useful if you are pulling more images than the host can handle, but slows the synchronization 
+    # process as picture-book will always pull each image, even if they have not been updated. 
     deleteLocalImages: true
 
 

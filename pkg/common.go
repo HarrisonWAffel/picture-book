@@ -45,6 +45,7 @@ type Registry struct {
 type Registries []Registry
 
 var RegistryNotFound = errors.New("could not find provided registry by hostname")
+var ImageNotFound = errors.New("repository does not exist")
 
 func (r Registries) GetRegistry(hostname string) (Registry, error) {
 	for _, registry := range r {
@@ -107,12 +108,28 @@ func ReTag(image, host, repository string) string {
 	return newImg
 }
 
+func GetImageAndTag(image string) (string, string) {
+	imgParts := strings.Split(image, ":")
+	if len(imgParts) == 2 {
+		return imgParts[0], imgParts[1]
+	} else {
+		return imgParts[0], ""
+	}
+}
+
 func BuildPullOptions(auth, hostname string) types.ImagePullOptions {
-	ops := types.ImagePullOptions{
-		RegistryAuth: auth,
+	ops := types.ImagePullOptions{}
+	username := ""
+	password := ""
+	auths := strings.Split(auth, ":")
+	if auth != "" && len(auths) == 2 {
+		username = auths[0]
+		password = auths[1]
 	}
 	if ops.RegistryAuth == "" {
 		ops.RegistryAuth = BuildEncodedAuthConfig(types.AuthConfig{
+			Username:      username,
+			Password:      password,
 			ServerAddress: hostname,
 		})
 	}
@@ -120,11 +137,18 @@ func BuildPullOptions(auth, hostname string) types.ImagePullOptions {
 }
 
 func BuildPushOptions(auth, hostname string) types.ImagePushOptions {
-	ops := types.ImagePushOptions{
-		RegistryAuth: auth,
+	ops := types.ImagePushOptions{}
+	username := ""
+	password := ""
+	auths := strings.Split(auth, ":")
+	if auth != "" && len(auths) == 2 {
+		username = auths[0]
+		password = auths[1]
 	}
 	if ops.RegistryAuth == "" {
 		ops.RegistryAuth = BuildEncodedAuthConfig(types.AuthConfig{
+			Username:      username,
+			Password:      password,
 			ServerAddress: hostname,
 		})
 	}

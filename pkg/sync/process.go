@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/docker/docker/api/types"
 	"github.com/pkg/errors"
+	"strings"
 	"time"
 
 	"github.com/HarrisonWAffel/playground/picture-book/pkg"
@@ -21,6 +22,7 @@ func (d *Syncer) Process() {
 		return
 	}
 	pkg.Logger.Infof("Beginning synchronization for %s", d.RegistryHostName)
+
 SyncLoop:
 	for _, image := range images {
 		if image == "" {
@@ -36,7 +38,20 @@ SyncLoop:
 
 		}
 
-		err := d.Pull(image)
+		// check if the target registry already has the image and tag being processed
+		alreadyPushed, err := d.ImageExistsOnRegistry(image)
+		if err != nil {
+			pkg.ErrLogger.Errorf("Error encountered while checking if image has already been pushed to %s: %v", d.RegistryHostName, err)
+			continue
+		}
+
+		if alreadyPushed {
+			pkg.Logger.Infof("%s has already been retagged and pushed to remote repository!", image)
+			// nothing to do!
+			continue
+		}
+
+		err = d.Pull(image)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			pkg.ErrLogger.Errorf("Error encountered while pulling %s: %v", image, err)
 			continue
@@ -75,15 +90,7 @@ var cfg = yacspin.Config{
 	StopColors:      []string{"fgGreen"},
 }
 
-// implementation for syncer functions push, pull, retag, and remove.
-// I recognize the implementation is duplicated for spinner vs non-spinner, but I like the spinner :)
-// should de-duplicate at some point in the future (maybe).
-
-func RemoveWithSpinner(ctx context.Context, client *client.Client, image, reTaggedImage string) error {
-	spinner, _ := yacspin.New(cfg)
-	spinner.Suffix(fmt.Sprintf("[%s] Removing locally held images %s, %s", time.Now().Format(pkg.TimeFormat), image, reTaggedImage))
-	spinner.Start()
-	defer spinner.Stop()
+func RemoveImage(ctx context.Context, client *client.Client, image string) error {
 	img, _, err := client.ImageInspectWithRaw(ctx, image)
 	if err != nil {
 		return err
@@ -96,26 +103,7 @@ func RemoveWithSpinner(ctx context.Context, client *client.Client, image, reTagg
 	return err
 }
 
-func RemoveWithoutSpinner(ctx context.Context, client *client.Client, image, reTaggedImage string) error {
-	pkg.Logger.Infof("Removing locally held images %s, %s", image, reTaggedImage)
-	img, _, err := client.ImageInspectWithRaw(ctx, image)
-	if err != nil {
-		return err
-	}
-	// force delete the image using its ID
-	_, err = client.ImageRemove(ctx, img.ID, types.ImageRemoveOptions{
-		Force:         true,
-		PruneChildren: true,
-	})
-	return err
-}
-
-func RetagWithSpinner(ctx context.Context, client *client.Client, image, hostname, repository string) (string, error) {
-	reTaggedImage := pkg.ReTag(image, hostname, repository)
-	spinner, _ := yacspin.New(cfg)
-	spinner.Suffix(fmt.Sprintf("[%s] Retagging %s -> %s: ", time.Now().Format(pkg.TimeFormat), image, reTaggedImage))
-	spinner.Start()
-	defer spinner.Stop()
+func Retag(ctx context.Context, client *client.Client, image, reTaggedImage string) (string, error) {
 	err := client.ImageTag(ctx, image, reTaggedImage)
 	if err != nil {
 		return "", err
@@ -123,72 +111,52 @@ func RetagWithSpinner(ctx context.Context, client *client.Client, image, hostnam
 	return reTaggedImage, nil
 }
 
-func RetagWithoutSpinner(ctx context.Context, client *client.Client, image, hostname, repository string) (string, error) {
-	reTaggedImage := pkg.ReTag(image, hostname, repository)
-	pkg.Logger.Infof("Retagging %s -> %s", image, reTaggedImage)
-	err := client.ImageTag(ctx, image, reTaggedImage)
-	if err != nil {
-		return "", err
-	}
-	return reTaggedImage, nil
-}
+// push / pull logic
 
-func PullWithSpinner(ctx context.Context, client *client.Client, image, hostname, auth string) error {
-	spinner, _ := yacspin.New(cfg)
-	spinner.Suffix(fmt.Sprintf("[%s] Pulling %s: ", time.Now().Format(pkg.TimeFormat), image))
-	spinner.Start()
-	defer spinner.Stop()
-
-	r, err := client.ImagePull(ctx, image, pkg.BuildPullOptions(auth, hostname))
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-	var status Status
-	scanner := bufio.NewScanner(r)
-	for {
-		if !scanner.Scan() {
-			spinner.Suffix(fmt.Sprintf("[%s] Done pulling %s", time.Now().Format(pkg.TimeFormat), image))
-			break
-		}
-		json.Unmarshal(scanner.Bytes(), &status)
-		spinner.Message(fmt.Sprintf("%s %s", status.Status, status.Progress))
-	}
-
-	return nil
-}
-
-func PushWithSpinner(ctx context.Context, client *client.Client, reTaggedImage, hostname, auth string) error {
-	spinner, _ := yacspin.New(cfg)
-	spinner.Suffix(fmt.Sprintf("%s Pushing %s", time.Now().Format(pkg.TimeFormat), reTaggedImage))
-	spinner.Start()
-	defer spinner.Stop()
-
+func PushWithDisplayFunc(ctx context.Context, client *client.Client, reTaggedImage, hostname, auth string, f func(scanner *bufio.Scanner, op, image, hostname string)) error {
 	r, err := client.ImagePush(ctx, reTaggedImage, pkg.BuildPushOptions(auth, hostname))
 	if err != nil {
 		return err
 	}
+	defer r.Close()
+	f(bufio.NewScanner(r), "Pushing", reTaggedImage, hostname)
+	return nil
+}
 
-	scanner := bufio.NewScanner(r)
-	var status Status
+func PullWithDisplayFunc(ctx context.Context, client *client.Client, image, hostname, auth string, f func(scanner *bufio.Scanner, op, image, hostname string)) error {
+	r, err := client.ImagePull(ctx, image, pkg.BuildPullOptions(auth, hostname))
+	if err != nil {
+		if strings.Contains(err.Error(), "repository does not exist") {
+			return pkg.ImageNotFound
+		}
+		return err
+	}
+	defer r.Close()
+	f(bufio.NewScanner(r), "Pulling", image, hostname)
+	return nil
+}
+
+// push / pull display logic
+
+func PushPullSpinner(scanner *bufio.Scanner, op, image, _ string) {
+	spinner, _ := yacspin.New(cfg)
+	spinner.Suffix(fmt.Sprintf("%s %s %s", op, time.Now().Format(pkg.TimeFormat), image))
+	spinner.Start()
+	defer spinner.Stop()
+
+	var status DockerStatusOutput
 	for {
 		if !scanner.Scan() {
-			spinner.Suffix(fmt.Sprintf("[%s] Done pushing %s", time.Now().Format(pkg.TimeFormat), reTaggedImage))
+			spinner.Suffix(fmt.Sprintf("[%s] Done pushing %s", time.Now().Format(pkg.TimeFormat), image))
 			break
 		}
 		json.Unmarshal(scanner.Bytes(), &status)
 		spinner.Message(fmt.Sprintf("%s %s", status.Status, status.Progress))
 	}
-	return nil
 }
 
-func PullWithoutSpinner(ctx context.Context, client *client.Client, image, hostname, auth string) error {
-	r, err := client.ImagePull(ctx, image, pkg.BuildPullOptions(auth, hostname))
-	if err != nil {
-		return err
-	}
-	scanner := bufio.NewScanner(r)
-	var status Status
+func PushPullStdDisplay(scanner *bufio.Scanner, _, image, hostname string) {
+	var status DockerStatusOutput
 	for {
 		if !scanner.Scan() {
 			break
@@ -200,26 +168,4 @@ func PullWithoutSpinner(ctx context.Context, client *client.Client, image, hostn
 			fmt.Println(fmt.Printf("%s: %s: %s", image, status.Status, status.Progress))
 		}
 	}
-	return nil
-}
-
-func PushWithoutSpinner(ctx context.Context, client *client.Client, reTaggedImage, hostname, auth string) error {
-	r, err := client.ImagePush(ctx, reTaggedImage, pkg.BuildPushOptions(auth, hostname))
-	if err != nil {
-		return err
-	}
-	scanner := bufio.NewScanner(r)
-	var status Status
-	for {
-		if !scanner.Scan() {
-			break
-		}
-		json.Unmarshal(scanner.Bytes(), &status)
-		if status.Progress == "" {
-			fmt.Println(fmt.Sprintf("%s: %s", hostname, status.Status))
-		} else {
-			fmt.Println(fmt.Printf("%s: %s %s", reTaggedImage, status.Status, status.Progress))
-		}
-	}
-	return nil
 }

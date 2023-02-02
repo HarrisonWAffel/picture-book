@@ -82,7 +82,7 @@ func main() {
 		Level: logrus.InfoLevel,
 		Formatter: &easy.Formatter{
 			TimestampFormat: pkg.TimeFormat,
-			LogFormat:       "[%time%] %msg%\n",
+			LogFormat:       "[%time%] %msg%",
 		},
 	}
 
@@ -91,7 +91,7 @@ func main() {
 		Level: logrus.InfoLevel,
 		Formatter: &easy.Formatter{
 			TimestampFormat: pkg.TimeFormat,
-			LogFormat:       "[%lvl%][%time%] %msg%\n",
+			LogFormat:       "[%lvl%][%time%] %msg%",
 		},
 	}
 	config.Setup()

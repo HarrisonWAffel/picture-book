@@ -1,9 +1,15 @@
 package sync
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/theckman/yacspin"
+	"io"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/HarrisonWAffel/playground/picture-book/pkg"
@@ -61,21 +67,108 @@ func (d *Syncer) SetContext(ctx context.Context, cancel context.CancelFunc) {
 func (d *Syncer) GetContext() (context.Context, context.CancelFunc) {
 	return d.Context, d.CancelFunc
 }
+
+// ImageExistsOnRegistry checks if the given image already exists on the host being pushed to.
+// if the image tag is 'latest', or is empty, an image will always be processed.
+func (d *Syncer) ImageExistsOnRegistry(image string) (bool, error) {
+	if image == "" {
+		return false, fmt.Errorf("encountered an empty image name")
+	}
+
+	imgWithoutTag, tag := pkg.GetImageAndTag(pkg.ReTag(image, d.RegistryHostName, d.Repository))
+
+	// latest tags will have their manifests updated
+	// regularly, so we should always try to pull and push
+	// the most recent version. If we aren't given a tag
+	// we should treat it as latest
+	if tag == "latest" || tag == "" {
+		return false, nil
+	}
+
+	// making an HTTP request to the registry being pushed to is easier than
+	// creating a whole new docker client for this.
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("https://%s/v2/%s/tags/list", d.RegistryHostName, imgWithoutTag), nil)
+	if err != nil {
+		return false, err
+	}
+
+	// setup basic auth
+	if d.PushAuth != "" {
+		auths := strings.Split(d.PushAuth, ":")
+		if len(auths) != 2 {
+			return false, fmt.Errorf("pushConfig for %s is improperly formatted, expected format is 'username:password'", d.RegistryHostName)
+		}
+		req.Header.Add("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", auths[0], auths[1]))))
+	}
+
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("error encountered making HTTP request to %s: %v", d.RegistryHostName, err)
+	}
+
+	// don't bother reading the response body if we get a 404
+	if r.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+
+	if r.StatusCode == http.StatusUnauthorized {
+		return false, fmt.Errorf("pushAuthConfig for %s is invalid", d.RegistryHostName)
+	}
+
+	var RegistryResponse struct {
+		Name string   `json:"name"`
+		Tags []string `json:"tags"`
+	}
+
+	defer r.Body.Close()
+	out, err := io.ReadAll(r.Body)
+	if err != nil {
+		return false, fmt.Errorf("error encountered reading HTTP response from %s: %v", d.RegistryHostName, err)
+	}
+
+	// since the json response body varies in format we want to
+	// use a map to check if we got any errors before we marshal
+	// the response body into a more useful struct
+	unstructuredResponse := make(map[string]interface{})
+	err = json.NewDecoder(bytes.NewReader(out)).Decode(&unstructuredResponse)
+	if err != nil {
+		return false, fmt.Errorf("error encountered reading HTTP response from %s: %v", d.RegistryHostName, err)
+	}
+
+	if _, ok := unstructuredResponse["errors"]; ok {
+		return false, fmt.Errorf("encountered an error handling unstructured response body: unstructured response = %v", unstructuredResponse)
+	}
+
+	// if we got a valid response marshal it into a struct to avoid casting
+	err = json.NewDecoder(bytes.NewReader(out)).Decode(&RegistryResponse)
+	if err != nil {
+		return false, err
+	}
+
+	for _, foundTag := range RegistryResponse.Tags {
+		if foundTag == tag {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func (d *Syncer) Pull(image string) error {
 	switch viper.GetString("display") {
 	case "spinner":
-		return PullWithSpinner(d.Context, d.client, image, d.RegistryHostName, d.PullAuth)
+		return PullWithDisplayFunc(d.Context, d.client, image, d.RegistryHostName, d.PullAuth, PushPullSpinner)
 	default:
-		return PullWithoutSpinner(d.Context, d.client, image, d.RegistryHostName, d.PullAuth)
+		return PullWithDisplayFunc(d.Context, d.client, image, d.RegistryHostName, d.PullAuth, PushPullStdDisplay)
 	}
 }
 
 func (d *Syncer) Push(image string) error {
 	switch viper.GetString("display") {
 	case "spinner":
-		return PushWithSpinner(d.Context, d.client, image, d.RegistryHostName, d.PushAuth)
+		return PushWithDisplayFunc(d.Context, d.client, image, d.RegistryHostName, d.PullAuth, PushPullSpinner)
 	default:
-		return PushWithoutSpinner(d.Context, d.client, image, d.RegistryHostName, d.PushAuth)
+		return PushWithDisplayFunc(d.Context, d.client, image, d.RegistryHostName, d.PullAuth, PushPullStdDisplay)
 	}
 }
 
@@ -83,18 +176,29 @@ func (d *Syncer) RemoveImage(image, retagged string) error {
 	// get the image so we have its ID
 	switch viper.GetString("display") {
 	case "spinner":
-		return RemoveWithSpinner(d.Context, d.client, image, retagged)
+		spinner, _ := yacspin.New(cfg)
+		spinner.Suffix(fmt.Sprintf("[%s] Removing locally held images %s, %s", time.Now().Format(pkg.TimeFormat), image, retagged))
+		spinner.Start()
+		defer spinner.Stop()
+		return RemoveImage(d.Context, d.client, image)
 	default:
-		return RemoveWithoutSpinner(d.Context, d.client, image, retagged)
+		pkg.Logger.Infof("Removing locally held images %s, %s", image, retagged)
+		return RemoveImage(d.Context, d.client, image)
 	}
 }
 
 func (d *Syncer) Retag(ctx context.Context, image string) (string, error) {
+	reTaggedImage := pkg.ReTag(image, d.RegistryHostName, d.Repository)
 	switch viper.GetString("display") {
 	case "spinner":
-		return RetagWithSpinner(ctx, d.client, image, d.RegistryHostName, d.Repository)
+		spinner, _ := yacspin.New(cfg)
+		spinner.Suffix(fmt.Sprintf("[%s] Retagging %s -> %s: ", time.Now().Format(pkg.TimeFormat), image, reTaggedImage))
+		spinner.Start()
+		defer spinner.Stop()
+		return Retag(ctx, d.client, image, reTaggedImage)
 	default:
-		return RetagWithoutSpinner(ctx, d.client, image, d.RegistryHostName, d.Repository)
+		pkg.Logger.Infof("Retagging %s -> %s", image, reTaggedImage)
+		return Retag(ctx, d.client, image, reTaggedImage)
 	}
 }
 
@@ -122,7 +226,7 @@ func (d *Syncer) Info() []byte {
 	return j
 }
 
-type Status struct {
+type DockerStatusOutput struct {
 	Status         string `json:"status"`
 	ProgressDetail struct {
 		Current int `json:"current"`
