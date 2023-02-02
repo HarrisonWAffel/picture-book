@@ -4,9 +4,11 @@ Each script here must be an executable binary or bash file, and may be as simple
 
 For example, a valid output looks like the following 
 
+```
 harrisonwaffel/image1:latest
 harrisonwaffel/image2:latest
 harrisonwaffel/image3:v1.3.2
+```
 
 Any unexpected output WILL prevent the syncing process from occurring. 
 

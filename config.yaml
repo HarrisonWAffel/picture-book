@@ -14,13 +14,13 @@
 
 registries:
   -
-    hostname: 'haffel1.cp-dev.rancher.space'
+    hostname: 'test-registry.com'
     repository: ''
     pullAuthConfig: ''
     pushAuthConfig: ''
     syncPeriod: '*/1 * * * *'
-    syncerScript: 'sync-scripts/get-rancher-images-for-tag'
-    syncerScriptArgs: 'v2.6.4'
+    syncerScript: 'test.sh'
+    syncerScriptArgs: ''
     deleteLocalImages: true
 
 
