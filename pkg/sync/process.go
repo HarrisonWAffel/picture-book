@@ -140,7 +140,7 @@ func PullWithDisplayFunc(ctx context.Context, client *client.Client, image, host
 
 func PushPullSpinner(scanner *bufio.Scanner, op, image, _ string) {
 	spinner, _ := yacspin.New(cfg)
-	spinner.Suffix(fmt.Sprintf("%s %s %s", op, time.Now().Format(pkg.TimeFormat), image))
+	spinner.Suffix(fmt.Sprintf("[%s] %s %s", time.Now().Format(pkg.TimeFormat), op, image))
 	spinner.Start()
 	defer spinner.Stop()
 

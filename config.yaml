@@ -10,11 +10,11 @@
 #    registryProvider: 'docker'
 #
 # ---
-# syncer scripts should be placed in pkg/sync-scripts (todo, use an env var)
+# syncer scripts should be placed in pkg/sync-scripts
 
 registries:
   -
-    hostname: 'test-registry.space'
+    hostname: 'haffel1.cp-dev.rancher.space'
     repository: ''
     pullAuthConfig: ''
     pushAuthConfig: ''

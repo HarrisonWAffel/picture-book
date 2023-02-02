@@ -6,7 +6,9 @@ require (
 	github.com/docker/docker v20.10.23+incompatible
 	github.com/spf13/viper v1.15.0
 	github.com/urfave/cli/v2 v2.23.7
-
+	github.com/go-co-op/gocron v1.18.0
+	github.com/t-tomalak/logrus-easy-formatter v0.0.0-20190827215021-c074f06c5816
+	github.com/theckman/yacspin v0.13.12
 )
 
 require (
@@ -40,15 +42,6 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.4.0 // indirect
-)
-
-require (
-	github.com/go-co-op/gocron v1.18.0
-	github.com/t-tomalak/logrus-easy-formatter v0.0.0-20190827215021-c074f06c5816
-	github.com/theckman/yacspin v0.13.12
-)
-
-require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/docker/go-metrics v0.0.1 // indirect
