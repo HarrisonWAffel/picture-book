@@ -50,7 +50,7 @@ var ImageNotFound = errors.New("repository does not exist")
 func (r Registries) GetRegistry(hostname string) (Registry, error) {
 	for _, registry := range r {
 		if registry.Hostname == hostname {
-			return registry, RegistryNotFound
+			return registry, nil
 		}
 	}
 	return Registry{}, RegistryNotFound
@@ -106,6 +106,10 @@ func ReTag(image, host, repository string) string {
 		}
 	}
 	return newImg
+}
+
+func ImageWithoutHost(image, host string) string {
+	return strings.ReplaceAll(image, host+"/", "")
 }
 
 func GetImageAndTag(image string) (string, string) {

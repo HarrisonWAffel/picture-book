@@ -75,7 +75,10 @@ func (d *Syncer) ImageExistsOnRegistry(image string) (bool, error) {
 		return false, fmt.Errorf("encountered an empty image name")
 	}
 
-	imgWithoutTag, tag := pkg.GetImageAndTag(image)
+	// we retag first to append the specified repository
+	// we then strip the hostname since it will be specified in the URL built later
+	// we then separate the image name and tag to use later
+	imgWithoutTag, tag := pkg.GetImageAndTag(pkg.ImageWithoutHost(pkg.ReTag(image, d.RegistryHostName, d.Repository), d.RegistryHostName))
 
 	// latest tags will have their manifests updated
 	// regularly, so we should always try to pull and push

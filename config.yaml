@@ -1,6 +1,6 @@
 # configuration settings
 
-# example configuraiton:
+# example configuration:
 #registries:
 #  -
 #    hostname: 'my-registry.com'
@@ -14,14 +14,23 @@
 
 registries:
   -
-    hostname: 'test-registry.com'
-    repository: ''
+    hostname: 'haffel1.cp-dev.rancher.space'
+    repository: 'demo'
     pullAuthConfig: ''
     pushAuthConfig: ''
     syncPeriod: '*/1 * * * *'
-    syncerScript: 'test.sh'
+    syncerScript: 'sync-scripts/test.sh'
     syncerScriptArgs: ''
     deleteLocalImages: true
+#  -
+#    hostname: 'haffel2.cp-dev.rancher.space'
+#    repository: ''
+#    pullAuthConfig: ''
+#    pushAuthConfig: 'testuser:tester123'
+#    syncPeriod: '*/1 * * * *'
+#    syncerScript: 'sync-scripts/get-rancher-images-for-tag'
+#    syncerScriptArgs: 'v2.7.0'
+#    deleteLocalImages: true
 
 
 # display can be either 'spinner' or empty.
@@ -34,4 +43,4 @@ api:
   port: 8001
   enabled: true
   authToken: this-is-a-token
-  enableAuth: true
+  enableAuth: false
